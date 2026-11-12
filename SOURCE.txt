@@ -1,0 +1,5 @@
+来源仓库：https://github.com/jazzband/tablib
+冻结 commit：b6a75dcbe01cc42b3fd45ae5005901e2639fa7a7
+许可证：MIT
+导入日期：2026-11-12
+说明：本目录为评测底座，已剥离上游 git 历史，仅保留代码快照。
