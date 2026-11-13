@@ -1,7 +1,7 @@
 """ Tablib - ODF Support.
 """
 
-__lazy_modules__ = {"datetime", "io", "numbers"}
+__lazy_modules__ = {"datetime", "io", "numbers", "tablib.utils"}
 
 import datetime as dt
 import numbers
@@ -10,6 +10,7 @@ from io import BytesIO
 from odf import number, opendocument, style, table, text
 
 import tablib
+from tablib.utils import sanitize_sheet_title, unique_sheet_titles
 
 bold = style.Style(name="bold", family="paragraph")
 bold.addElement(style.TextProperties(
@@ -82,7 +83,10 @@ class ODSFormat:
         wb.styles.addElement(datetime_style)
         wb.automaticstyles.addElement(dts)
 
-        ws = table.Table(name=dataset.title if dataset.title else 'Tablib Dataset')
+        ws = table.Table(
+            name=sanitize_sheet_title(dataset.title, 1)
+            if dataset.title else 'Tablib Dataset'
+        )
         wb.spreadsheet.addElement(ws)
         cls.dset_sheet(dataset, ws)
 
@@ -97,8 +101,9 @@ class ODSFormat:
         wb = opendocument.OpenDocumentSpreadsheet()
         wb.automaticstyles.addElement(bold)
 
-        for i, dset in enumerate(databook._datasets):
-            ws = table.Table(name=dset.title if dset.title else f"Sheet{i}")
+        titles = unique_sheet_titles([dset.title for dset in databook._datasets])
+        for title, dset in zip(titles, databook._datasets):
+            ws = table.Table(name=title)
             wb.spreadsheet.addElement(ws)
             cls.dset_sheet(dset, ws)
 

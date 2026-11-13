@@ -10,12 +10,16 @@
 
 __lazy_modules__ = {
     "copy",
+    "io",
     "operator",
+    "os",
     "tablib.exceptions",
     "tablib.utils",
 }
 
+import os
 from copy import copy
+from io import TextIOWrapper
 from operator import itemgetter
 
 from .exceptions import (
@@ -413,10 +417,15 @@ class Dataset:
     def load(self, in_stream, format=None, **kwargs):
         """
         Import `in_stream` to the :class:`Dataset` object using the `format`.
-        `in_stream` can be a file-like object, a string, or a bytestring.
+        `in_stream` can be a file-like object, a string, a bytestring, or a
+        path to a file.
 
         :param \\*\\*kwargs: (optional) custom configuration to the format `import_set`.
         """
+
+        if _is_file_path(in_stream):
+            with open(in_stream, 'rb') as stream:
+                return self.load(stream, format, **kwargs)
 
         stream = normalize_input(in_stream)
         if not format:
@@ -440,6 +449,51 @@ class Dataset:
             raise UnsupportedFormat(f'Format {format} cannot be exported.')
 
         return fmt.export_set(self, **kwargs)
+
+    def export_to_file(self, path, format='csv', **kwargs):
+        """
+        Export :class:`Dataset` object to `format`, writing directly to
+        `path` — a filesystem path or an already-open file object. When the
+        format supports streaming (e.g. csv), output is generated and written
+        incrementally instead of being built in memory first; the bytes
+        written are identical to :method:`Dataset.export`.
+
+        :param \\*\\*kwargs: (optional) custom configuration to the format `export_set`.
+        """
+        fmt = registry.get_format(format)
+        if not hasattr(fmt, 'export_set'):
+            raise UnsupportedFormat(f'Format {format} cannot be exported.')
+
+        write_set = getattr(fmt, 'write_set', None)
+
+        if isinstance(path, (str, os.PathLike)):
+            if write_set is not None:
+                with open(path, 'w', newline='', encoding='utf-8') as stream:
+                    write_set(self, stream, **kwargs)
+            else:
+                data = fmt.export_set(self, **kwargs)
+                mode = 'wb' if isinstance(data, bytes) else 'w'
+                with open(path, mode) as stream:
+                    stream.write(data)
+            return
+
+        if write_set is not None:
+            wrapper = None
+            try:
+                path.write('')
+                stream = path
+            except TypeError:
+                # Binary file object: write text through a wrapper, but leave
+                # the underlying file open for the caller to close.
+                wrapper = TextIOWrapper(path, encoding='utf-8', newline='')
+                stream = wrapper
+            try:
+                write_set(self, stream, **kwargs)
+            finally:
+                if wrapper is not None:
+                    wrapper.detach()
+        else:
+            path.write(fmt.export_set(self, **kwargs))
 
     # ----
     # Rows
@@ -905,10 +959,15 @@ class Databook:
     def load(self, in_stream, format, **kwargs):
         """
         Import `in_stream` to the :class:`Databook` object using the `format`.
-        `in_stream` can be a file-like object, a string, or a bytestring.
+        `in_stream` can be a file-like object, a string, a bytestring, or a
+        path to a file.
 
         :param \\*\\*kwargs: (optional) custom configuration to the format `import_book`.
         """
+
+        if _is_file_path(in_stream):
+            with open(in_stream, 'rb') as stream:
+                return self.load(stream, format, **kwargs)
 
         stream = normalize_input(in_stream)
         if not format:
@@ -932,6 +991,23 @@ class Databook:
             raise UnsupportedFormat(f'Format {format} cannot be exported.')
 
         return fmt.export_book(self, **kwargs)
+
+
+def _is_file_path(stream):
+    """Return True if `stream` is a string or PathLike pointing at an existing file.
+
+    Strings containing newlines are always considered inline content, never
+    paths.
+    """
+    if not isinstance(stream, (str, os.PathLike)):
+        return False
+    try:
+        candidate = os.fspath(stream)
+    except TypeError:
+        return False
+    if isinstance(candidate, str) and ('\n' in candidate or '\r' in candidate):
+        return False
+    return os.path.isfile(candidate)
 
 
 def detect_format(stream):

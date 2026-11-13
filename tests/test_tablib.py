@@ -1536,21 +1536,22 @@ class XLSXTests(BaseTestCase):
 
     def test_xlsx_bad_chars_sheet_name(self):
         """
-        Sheet names are limited to 30 chars and the following chars
+        Sheet names are limited to 31 chars and the following chars
         are not permitted: \\ / * ? : [ ]
+        (they are replaced with '_' by the rules shared with ODS)
         """
         _dataset = tablib.Dataset(
             title='bad name \\/*?:[]qwertyuiopasdfghjklzxcvbnm'
         )
         _xlsx = _dataset.export('xlsx')
         new_data = tablib.Dataset().load(_xlsx)
-        self.assertEqual(new_data.title, 'bad name -------qwertyuiopasdfg')
+        self.assertEqual(new_data.title, 'bad name _______qwertyuiopasdfg')
 
         _book = tablib.Databook()
         _book.add_sheet(_dataset)
         _xlsx = _book.export('xlsx')
         new_data = tablib.Databook().load(_xlsx, 'xlsx')
-        self.assertEqual(new_data.sheets()[0].title, 'bad name -------qwertyuiopasdfg')
+        self.assertEqual(new_data.sheets()[0].title, 'bad name _______qwertyuiopasdfg')
 
     def test_xlsx_import_book_ragged(self):
         """Import XLSX file through databook when not all rows have the same length."""

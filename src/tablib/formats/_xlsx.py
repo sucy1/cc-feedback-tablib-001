@@ -9,6 +9,7 @@ __lazy_modules__ = {
     "openpyxl.styles",
     "openpyxl.utils",
     "openpyxl.workbook",
+    "tablib.utils",
 }
 
 import re
@@ -20,11 +21,17 @@ from openpyxl.utils import get_column_letter
 from openpyxl.workbook import Workbook
 
 import tablib
+from tablib.utils import sanitize_sheet_title, unique_sheet_titles
 
 INVALID_TITLE_REGEX = re.compile(r'[\\*?:/\[\]]')
 
 
 def safe_xlsx_sheet_title(s, replace="-"):
+    """Legacy title sanitizer, kept for backward compatibility.
+
+    New code should use ``tablib.utils.sanitize_sheet_title`` so XLSX and ODS
+    exports share the same rules.
+    """
     return re.sub(INVALID_TITLE_REGEX, replace, s)[:31]
 
 
@@ -45,16 +52,17 @@ class XLSXFormat:
             return False
 
     @classmethod
-    def export_set(cls, dataset, freeze_panes=True, invalid_char_subst="-",
+    def export_set(cls, dataset, freeze_panes=True, invalid_char_subst=None,
                    escape=False, column_width="adaptive"):
         """Returns XLSX representation of Dataset.
 
         If ``freeze_panes`` is True, Export will freeze panes only after first line.
 
-        If ``dataset.title`` contains characters which are
-        considered invalid for an XLSX file sheet name
-        (https://web.archive.org/web/20230323081941/https://www.excelcodex.com/2012/06/worksheets-naming-conventions/),
-        they will be replaced with ``invalid_char_subst``.
+        The sheet title is normalized with the rules shared with the ODS
+        format (see ``tablib.utils.sanitize_sheet_title``): invalid
+        characters are replaced with ``_`` and the title is truncated to 31
+        characters. Pass ``invalid_char_subst`` to keep the legacy behavior
+        of replacing invalid characters with that value instead.
 
         If ``escape`` is True, formulae will have the leading '=' character removed.
         This is a security measure to prevent formulae from executing by default
@@ -69,10 +77,14 @@ class XLSXFormat:
         wb = Workbook()
         ws = wb.worksheets[0]
 
-        ws.title = (
-            safe_xlsx_sheet_title(dataset.title, invalid_char_subst)
-            if dataset.title else 'Tablib Dataset'
-        )
+        if dataset.title:
+            ws.title = (
+                safe_xlsx_sheet_title(dataset.title, invalid_char_subst)
+                if invalid_char_subst is not None
+                else sanitize_sheet_title(dataset.title, 1)
+            )
+        else:
+            ws.title = 'Tablib Dataset'
 
         cls.dset_sheet(dataset, ws, freeze_panes=freeze_panes, escape=escape)
 
@@ -83,7 +95,7 @@ class XLSXFormat:
         return stream.getvalue()
 
     @classmethod
-    def export_book(cls, databook, freeze_panes=True, invalid_char_subst="-",
+    def export_book(cls, databook, freeze_panes=True, invalid_char_subst=None,
                     escape=False, column_width=None):
         """Returns XLSX representation of DataBook.
         See export_set().
@@ -92,12 +104,22 @@ class XLSXFormat:
         wb = Workbook()
         for sheet in wb.worksheets:
             wb.remove(sheet)
-        for i, dset in enumerate(databook._datasets):
-            ws = wb.create_sheet()
-            ws.title = (
+
+        if invalid_char_subst is not None:
+            # Legacy behavior.
+            titles = [
                 safe_xlsx_sheet_title(dset.title, invalid_char_subst)
                 if dset.title else f"Sheet{i}"
+                for i, dset in enumerate(databook._datasets)
+            ]
+        else:
+            titles = unique_sheet_titles(
+                [dset.title for dset in databook._datasets]
             )
+
+        for title, dset in zip(titles, databook._datasets):
+            ws = wb.create_sheet()
+            ws.title = title
 
             cls.dset_sheet(dset, ws, freeze_panes=freeze_panes, escape=escape)
 
